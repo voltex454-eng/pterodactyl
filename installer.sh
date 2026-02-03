@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # ==========================================
-# Pterodactyl Automated Installer (Dynamic Domain)
+# Pterodactyl Automated Installer (Final Version)
 # ==========================================
 
-# 1. Ask for Domain User Input
+# 1. Domain Input
 echo "=========================================="
 echo "   Pterodactyl Panel Installer Setup"
 echo "=========================================="
@@ -17,7 +17,7 @@ if [ -z "$DOMAIN" ]; then
     exit 1
 fi
 
-# Auto-generate Email and DB details
+# Variables
 EMAIL="admin@$DOMAIN"
 DB_PASS="pass5695@#"
 DB_USER="pterodactyl"
@@ -26,16 +26,14 @@ DB_NAME="panel"
 echo ""
 echo "------------------------------------------"
 echo "Target Domain: $DOMAIN"
-echo "Admin Email  : $EMAIL"
-echo "Database     : $DB_NAME"
+echo "Script will auto-select Option '2' for SSL"
 echo "------------------------------------------"
 echo "Starting Installation in 3 seconds..."
-echo "Make sure your Domain's DNS points to this IP!"
 sleep 3
 
 # 2. Add Repositories
 echo "--- Adding Repositories ---"
-apt -y install software-properties-common curl apt-transport-https ca-certificates gnupg certbot python3-certbot-nginx
+apt -y install software-properties-common curl apt-transport-https ca-certificates gnupg
 
 # Add PHP Repository
 LC_ALL=C.UTF-8 add-apt-repository -y ppa:ondrej/php
@@ -48,7 +46,7 @@ echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://pack
 apt update
 
 # 3. Install Dependencies
-echo "--- Installing Dependencies (PHP 8.3, MariaDB, Nginx, Redis) ---"
+echo "--- Installing Dependencies ---"
 apt -y install php8.3 php8.3-{common,cli,gd,mysql,mbstring,bcmath,xml,fpm,curl,zip} mariadb-server nginx tar unzip git redis-server
 
 # 4. Install Composer
@@ -63,7 +61,7 @@ curl -Lo panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/downl
 tar -xzvf panel.tar.gz
 chmod -R 755 storage/* bootstrap/cache/
 
-# 6. Database Setup (Fully Automated)
+# 6. Database Setup
 echo "--- Setting up Database ---"
 sudo mysql -u root -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}';"
 sudo mysql -u root -e "CREATE DATABASE IF NOT EXISTS ${DB_NAME};"
@@ -76,9 +74,10 @@ cp .env.example .env
 COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
 php artisan key:generate --force
 
-# Automating "php artisan p:environment:setup"
-echo "--- Running p:environment:setup for $DOMAIN ---"
-php artisan p:environment:setup \
+# Automating "php artisan p:environment:setup" with extra Enter handling
+echo "--- Running p:environment:setup ---"
+# Using 'yes' to handle any "Are you sure?" prompts or missing enters
+yes "" | php artisan p:environment:setup \
     --author="$EMAIL" \
     --url="https://$DOMAIN" \
     --timezone="Asia/Kolkata" \
@@ -133,14 +132,10 @@ EOF
 sudo systemctl enable --now redis-server
 sudo systemctl enable --now pteroq.service
 
-# 10. SSL Certificate Generation
-echo "--- Generating SSL Certificate for $DOMAIN ---"
-# Stopping Nginx to allow Certbot standalone mode to work seamlessly
-systemctl stop nginx
-certbot certonly --standalone -d $DOMAIN --non-interactive --agree-tos -m $EMAIL
-
-# 11. Nginx Configuration
-echo "--- Configuring Nginx ---"
+# 10. Nginx Configuration (Basic)
+# Note: The external SSL script will likely modify or overwrite Nginx configs,
+# but we set up the basic Pterodactyl config first as a base.
+echo "--- Configuring Initial Nginx ---"
 rm /etc/nginx/sites-enabled/default
 
 cat <<EOF > /etc/nginx/sites-enabled/pterodactyl.conf
@@ -153,7 +148,6 @@ server {
 server {
     listen 8443 ssl http2;
     server_name $DOMAIN;
-
     root /var/www/pterodactyl/public;
     index index.php;
 
@@ -163,22 +157,11 @@ server {
     client_max_body_size 100m;
     client_body_timeout 120s;
     sendfile off;
-
-    # SSL Configuration
-    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
-    ssl_session_cache shared:SSL:10m;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
-    ssl_prefer_server_ciphers on;
-
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
-    add_header X-Robots-Tag none;
-    add_header Content-Security-Policy "frame-ancestors 'self'";
-    add_header X-Frame-Options DENY;
-    add_header Referrer-Policy same-origin;
-
+    
+    # Placeholders for SSL (External script will handle real certs)
+    # Ensure these paths are valid or commented out if certs don't exist yet
+    # We will let the external script handle the final SSL injection
+    
     location / {
         try_files \$uri \$uri/ /index.php?\$query_string;
     }
@@ -199,20 +182,19 @@ server {
         fastcgi_read_timeout 300;
         include /etc/nginx/fastcgi_params;
     }
-
-    location ~ /\.ht {
-        deny all;
-    }
 }
 EOF
 
-# Final Restart
+# 11. External SSL Script (Automated)
+echo "--- Running External SSL Script ---"
+# Passing Domain (Line 1) and '2' (Line 2) automatically
+printf "$DOMAIN\n2\n" | bash <(curl -s https://raw.githubusercontent.com/NothingTheking/SSL/refs/heads/main/main.sh)
+
+# 12. Final Restart
 echo "--- Restarting Nginx ---"
 systemctl restart nginx
 
 echo "=========================================="
 echo "✅ Installation Complete!"
 echo "Pterodactyl is running at https://$DOMAIN:8443"
-echo "User: $EMAIL"
-echo "Pass: (User/Pass jo tumne manually setup kiya ho ya default)"
 echo "=========================================="
