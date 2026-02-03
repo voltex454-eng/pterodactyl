@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# Pterodactyl Automated Installer (Final Version)
+# Pterodactyl Automated Installer (Exact Nginx Config)
 # ==========================================
 
 # 1. Domain Input
@@ -26,7 +26,7 @@ DB_NAME="panel"
 echo ""
 echo "------------------------------------------"
 echo "Target Domain: $DOMAIN"
-echo "Script will auto-select Option '2' for SSL"
+echo "SSL Setup: Automated (Option 2)"
 echo "------------------------------------------"
 echo "Starting Installation in 3 seconds..."
 sleep 3
@@ -74,9 +74,9 @@ cp .env.example .env
 COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
 php artisan key:generate --force
 
-# Automating "php artisan p:environment:setup" with extra Enter handling
+# Automating "php artisan p:environment:setup"
 echo "--- Running p:environment:setup ---"
-# Using 'yes' to handle any "Are you sure?" prompts or missing enters
+# 'yes' command handles any extra confirmation prompts
 yes "" | php artisan p:environment:setup \
     --author="$EMAIL" \
     --url="https://$DOMAIN" \
@@ -132,36 +132,59 @@ EOF
 sudo systemctl enable --now redis-server
 sudo systemctl enable --now pteroq.service
 
-# 10. Nginx Configuration (Basic)
-# Note: The external SSL script will likely modify or overwrite Nginx configs,
-# but we set up the basic Pterodactyl config first as a base.
-echo "--- Configuring Initial Nginx ---"
-rm /etc/nginx/sites-enabled/default
+# 10. External SSL Script (Must run BEFORE writing Nginx config)
+echo "--- Running External SSL Script ---"
+# Stop Nginx first to avoid conflicts if script uses standalone mode
+systemctl stop nginx
+# Automatically inputs Domain -> Enter -> 2 -> Enter
+printf "$DOMAIN\n2\n" | bash <(curl -s https://raw.githubusercontent.com/NothingTheking/SSL/refs/heads/main/main.sh)
+
+# 11. Nginx Configuration (EXACT USER CONFIG)
+echo "--- Writing Nginx Config ---"
+rm /etc/nginx/sites-enabled/default 2>/dev/null
 
 cat <<EOF > /etc/nginx/sites-enabled/pterodactyl.conf
 server {
+    # Replace the example with your domain name or IP address
     listen 80;
     server_name $DOMAIN;
     return 301 https://\$server_name\$request_uri;
 }
 
 server {
+    # Replace the example with your domain name or IP address
     listen 8443 ssl http2;
     server_name $DOMAIN;
+
     root /var/www/pterodactyl/public;
     index index.php;
 
     access_log /var/log/nginx/pterodactyl.app-access.log;
     error_log  /var/log/nginx/pterodactyl.app-error.log error;
 
+    # allow larger file uploads and longer script runtimes
     client_max_body_size 100m;
     client_body_timeout 120s;
+
     sendfile off;
-    
-    # Placeholders for SSL (External script will handle real certs)
-    # Ensure these paths are valid or commented out if certs don't exist yet
-    # We will let the external script handle the final SSL injection
-    
+
+    # SSL Configuration - Replace the example with your domain
+    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    ssl_session_cache shared:SSL:10m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
+    ssl_prefer_server_ciphers on;
+
+    # See https://hstspreload.org/ before uncommenting the line below.
+    # add_header Strict-Transport-Security "max-age=15768000; preload;";
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header X-Robots-Tag none;
+    add_header Content-Security-Policy "frame-ancestors 'self'";
+    add_header X-Frame-Options DENY;
+    add_header Referrer-Policy same-origin;
+
     location / {
         try_files \$uri \$uri/ /index.php?\$query_string;
     }
@@ -182,13 +205,12 @@ server {
         fastcgi_read_timeout 300;
         include /etc/nginx/fastcgi_params;
     }
+
+    location ~ /\.ht {
+        deny all;
+    }
 }
 EOF
-
-# 11. External SSL Script (Automated)
-echo "--- Running External SSL Script ---"
-# Passing Domain (Line 1) and '2' (Line 2) automatically
-printf "$DOMAIN\n2\n" | bash <(curl -s https://raw.githubusercontent.com/NothingTheking/SSL/refs/heads/main/main.sh)
 
 # 12. Final Restart
 echo "--- Restarting Nginx ---"
