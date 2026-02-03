@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# Pterodactyl Automated Installer (Exact Nginx Config)
+# Pterodactyl Automated Installer (User Setup Included)
 # ==========================================
 
 # 1. Domain Input
@@ -132,27 +132,24 @@ EOF
 sudo systemctl enable --now redis-server
 sudo systemctl enable --now pteroq.service
 
-# 10. External SSL Script (Must run BEFORE writing Nginx config)
+# 10. External SSL Script
 echo "--- Running External SSL Script ---"
-# Stop Nginx first to avoid conflicts if script uses standalone mode
 systemctl stop nginx
 # Automatically inputs Domain -> Enter -> 2 -> Enter
 printf "$DOMAIN\n2\n" | bash <(curl -s https://raw.githubusercontent.com/NothingTheking/SSL/refs/heads/main/main.sh)
 
-# 11. Nginx Configuration (EXACT USER CONFIG)
+# 11. Nginx Configuration
 echo "--- Writing Nginx Config ---"
 rm /etc/nginx/sites-enabled/default 2>/dev/null
 
 cat <<EOF > /etc/nginx/sites-enabled/pterodactyl.conf
 server {
-    # Replace the example with your domain name or IP address
     listen 80;
     server_name $DOMAIN;
     return 301 https://\$server_name\$request_uri;
 }
 
 server {
-    # Replace the example with your domain name or IP address
     listen 8443 ssl http2;
     server_name $DOMAIN;
 
@@ -162,13 +159,12 @@ server {
     access_log /var/log/nginx/pterodactyl.app-access.log;
     error_log  /var/log/nginx/pterodactyl.app-error.log error;
 
-    # allow larger file uploads and longer script runtimes
     client_max_body_size 100m;
     client_body_timeout 120s;
 
     sendfile off;
 
-    # SSL Configuration - Replace the example with your domain
+    # SSL Configuration
     ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
     ssl_session_cache shared:SSL:10m;
@@ -176,8 +172,6 @@ server {
     ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
     ssl_prefer_server_ciphers on;
 
-    # See https://hstspreload.org/ before uncommenting the line below.
-    # add_header Strict-Transport-Security "max-age=15768000; preload;";
     add_header X-Content-Type-Options nosniff;
     add_header X-XSS-Protection "1; mode=block";
     add_header X-Robots-Tag none;
@@ -216,7 +210,20 @@ EOF
 echo "--- Restarting Nginx ---"
 systemctl restart nginx
 
+# 13. Create User Manually
+echo ""
 echo "=========================================="
-echo "✅ Installation Complete!"
+echo "⚡ USER CREATION REQUIRED ⚡"
+echo "=========================================="
+echo "Please enter details to create your Admin User."
+echo "Yes/No pucha jaye to 'yes' likhna."
+echo ""
+
+# Running User Make Command Interactively
+php artisan p:user:make
+
+echo ""
+echo "=========================================="
+echo "✅ Installation Successfully Complete!"
 echo "Pterodactyl is running at https://$DOMAIN:8443"
 echo "=========================================="
